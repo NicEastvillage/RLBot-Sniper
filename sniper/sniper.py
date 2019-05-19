@@ -37,7 +37,7 @@ class SniperBot(BaseAgent):
 
         ball_pos = self.info.ball.pos
 
-        print(packet.game_info.is_kickoff_pause, packet.game_info.is_round_active, dt == 0, packet.game_info.game_time_remaining, dt_gtr, packet.game_info.seconds_elapsed)
+        # print(packet.game_info.is_kickoff_pause, packet.game_info.is_round_active, dt == 0, packet.game_info.game_time_remaining, dt_gtr, packet.game_info.seconds_elapsed)
 
         if ball_pos[0] == 0 and ball_pos[1] == 0 and packet.game_info.is_kickoff_pause:
             # Kickoff and pauses
