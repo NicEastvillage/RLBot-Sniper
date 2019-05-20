@@ -7,7 +7,8 @@ from rlbot.utils.structures.game_data_struct import GameTickPacket
 
 from RLUtilities.LinearAlgebra import *
 
-SPEED = 2500
+NORMAL_SPEED = 2100
+SUPER_SPEED = 3500
 AIM_DURATION = 2.0
 AIM_DURATION_AFTER_KICKOFF = 0.8
 
@@ -30,6 +31,8 @@ class SniperBot(BaseAgent):
         self.last_elapsed_seconds = 0
         self.kickoff_timer_edge = False
         self.ball_moved = False
+        self.next_is_super = False
+        self.doing_super = False
 
     def get_output(self, packet: GameTickPacket) -> SimpleControllerState:
         dt = packet.game_info.seconds_elapsed - self.last_elapsed_seconds
@@ -76,10 +79,16 @@ class SniperBot(BaseAgent):
 
             if self.shoot_time < self.info.time:
                 self.state = self.FLYING
+                if self.next_is_super:
+                    self.doing_super = True
+                    self.next_is_super = False
+                else:
+                    self.doing_super = False
 
         elif self.state == self.FLYING:
 
-            vel = self.direction * SPEED
+            speed = SUPER_SPEED if self.doing_super else NORMAL_SPEED
+            vel = self.direction * speed
             n_pos = self.last_pos + vel * dt
 
             car_state = CarState(Physics(location=to_fb(n_pos), velocity=to_fb(vel)))
@@ -87,15 +96,19 @@ class SniperBot(BaseAgent):
             self.set_game_state(game_state)
 
             self.last_pos = n_pos
+            self.controls.boost = self.doing_super
 
             if abs(n_pos[0]) > 4080 or abs(n_pos[1]) > 5080 or n_pos[2] < 0 or n_pos[2] > 2020:
+                # Crash
                 self.state = self.AIMING
                 self.shoot_time = self.info.time + AIM_DURATION
                 self.last_pos = self.standby_position
+                self.next_is_super = self.info.my_car.boost >= 100
 
         return self.controls
 
     def predicted_ball_pos(self):
+        speed = SUPER_SPEED if self.next_is_super else NORMAL_SPEED
         ball_prediction = self.get_ball_prediction_struct()
 
         if ball_prediction is not None:
@@ -103,7 +116,7 @@ class SniperBot(BaseAgent):
             SECONDS = 6
 
             dist = norm(self.info.my_car.pos - self.info.ball.pos)
-            time = dist / SPEED
+            time = dist / speed
             slice_index = min(max(0, math.floor(SLICES_PER_SEC * time)), SLICES_PER_SEC * SECONDS - 1)
             pos = ball_prediction.slices[slice_index].physics.location
             return vec3(pos.x, pos.y, pos.z)
