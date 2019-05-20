@@ -8,12 +8,14 @@ from rlbot.utils.structures.game_data_struct import GameTickPacket
 from RLUtilities.LinearAlgebra import *
 
 SPEED = 2500
-AIM_DURATION = 1.5
+AIM_DURATION = 2.0
+AIM_DURATION_AFTER_KICKOFF = 0.8
 
 
 class SniperBot(BaseAgent):
     AIMING = 0
     FLYING = 1
+    KICKOFF = 2
 
     def __init__(self, name, team, index):
         super().__init__(name, team, index)
@@ -22,28 +24,37 @@ class SniperBot(BaseAgent):
         tsign = -1 if self.team == 0 else 1
         self.standby_position = vec3(0, tsign * 5030, 300)
         self.direction = -1 * vec3(0, tsign, 0)
-        self.state = self.AIMING
+        self.state = self.KICKOFF
         self.shoot_time = 0
         self.last_pos = self.standby_position
         self.last_elapsed_seconds = 0
-        self.last_gtr = 0
+        self.kickoff_timer_edge = False
+        self.ball_moved = False
 
     def get_output(self, packet: GameTickPacket) -> SimpleControllerState:
         dt = packet.game_info.seconds_elapsed - self.last_elapsed_seconds
-        dt_gtr = packet.game_info.game_time_remaining - self.last_gtr
-        self.last_gtr = packet.game_info.game_time_remaining
         self.last_elapsed_seconds = packet.game_info.seconds_elapsed
         self.info.read_packet(packet)
 
         ball_pos = self.info.ball.pos
 
-        # print(packet.game_info.is_kickoff_pause, packet.game_info.is_round_active, dt == 0, packet.game_info.game_time_remaining, dt_gtr, packet.game_info.seconds_elapsed)
+        if ball_pos[0] != 0 or ball_pos[1] != 0:
+            self.ball_moved = True
 
-        if ball_pos[0] == 0 and ball_pos[1] == 0 and packet.game_info.is_kickoff_pause:
-            # Kickoff and pauses
-            self.state = self.AIMING
-            self.shoot_time = self.info.time + AIM_DURATION
-            self.controls.boost = False
+        if ball_pos[0] == 0 and ball_pos[1] == 0 and self.info.my_car.boost == 34 and not self.state == self.KICKOFF and self.ball_moved:
+            # Ball is placed at the center - assume kickoff
+            self.state = self.KICKOFF
+            self.ball_moved = False
+
+        if self.state == self.KICKOFF:
+            if packet.game_info.is_kickoff_pause:
+                self.kickoff_timer_edge = True
+            if ball_pos[0] != 0 or ball_pos[1] != 0 or (self.kickoff_timer_edge and not packet.game_info.is_kickoff_pause):
+                self.shoot_time = self.info.time + AIM_DURATION_AFTER_KICKOFF
+                self.controls.boost = False
+                self.kickoff_timer_edge = False
+                self.state = self.AIMING
+                self.last_pos = self.standby_position
 
         elif self.state == self.AIMING:
 
@@ -51,7 +62,7 @@ class SniperBot(BaseAgent):
             ball_pos = self.predicted_ball_pos()
             self.direction = d = normalize(ball_pos - self.standby_position)
 
-            rotation = Rotator(0, math.atan2(d[1], d[0]), 0)
+            rotation = Rotator(math.asin(d[2]), math.atan2(d[1], d[0]), 0)
             car_state = CarState(Physics(location=to_fb(self.standby_position),
                                          velocity=Vector3(0, 0, 0),
                                          rotation=rotation,
