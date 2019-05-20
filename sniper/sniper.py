@@ -11,7 +11,7 @@ NORMAL_SPEED = 2100
 SUPER_SPEED = 3500
 AIM_DURATION = 2.0
 AIM_DURATION_AFTER_KICKOFF = 0.8
-
+GOAL_AIM_BIAS_AMOUNT = 50
 
 class SniperBot(BaseAgent):
     AIMING = 0
@@ -112,14 +112,27 @@ class SniperBot(BaseAgent):
         ball_prediction = self.get_ball_prediction_struct()
 
         if ball_prediction is not None:
-            SLICES_PER_SEC = 60
-            SECONDS = 6
+            TIME_PER_SLICES = 1/60.0
+            SLICES = 360
 
-            dist = norm(self.info.my_car.pos - self.info.ball.pos)
-            time = dist / speed
-            slice_index = min(max(0, math.floor(SLICES_PER_SEC * time)), SLICES_PER_SEC * SECONDS - 1)
-            pos = ball_prediction.slices[slice_index].physics.location
-            return vec3(pos.x, pos.y, pos.z)
+            # Iterate to find the first location which can be hit
+            for i in range(0, 360):
+                time = i * TIME_PER_SLICES
+                rlpos = ball_prediction.slices[i].physics.location
+                pos = vec3(rlpos.x, rlpos.y, rlpos.z)
+                dist = norm(self.standby_position - pos)
+                travel_time = dist / speed
+                if time + TIME_PER_SLICES > travel_time:
+                    # Add small bias for aiming
+                    tsign = -1 if self.team == 0 else 1
+                    enemy_goal = vec3(0, tsign * -5030, 300)
+                    bias_direction = normalize(pos - enemy_goal)
+                    pos = pos + bias_direction * GOAL_AIM_BIAS_AMOUNT
+                    return pos
+
+            # Use last
+            rlpos = ball_prediction.slices[SLICES - 1].physics.location
+            return vec3(rlpos.x, rlpos.y, rlpos.z)
 
         return vec3(0, 0, 0)
 
