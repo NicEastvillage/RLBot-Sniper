@@ -1,4 +1,5 @@
 import math
+import random
 
 from RLUtilities.GameInfo import GameInfo
 from rlbot.agents.base_agent import BaseAgent, SimpleControllerState
@@ -7,10 +8,10 @@ from rlbot.utils.structures.game_data_struct import GameTickPacket
 
 from RLUtilities.LinearAlgebra import *
 
-NORMAL_SPEED = 2100
-SUPER_SPEED = 3500
+NORMAL_SPEED = 2300
+SUPER_SPEED = 3600
 AIM_DURATION = 2.0
-AIM_DURATION_AFTER_KICKOFF = 0.8
+AIM_DURATION_AFTER_KICKOFF = 0.2 + random.uniform(0, 1)
 GOAL_AIM_BIAS_AMOUNT = 50
 
 class SniperBot(BaseAgent):
@@ -22,9 +23,8 @@ class SniperBot(BaseAgent):
         super().__init__(name, team, index)
         self.controls = SimpleControllerState()
         self.info = GameInfo(self.index, self.team)
-        tsign = -1 if self.team == 0 else 1
-        self.standby_position = vec3(0, tsign * 5030, 300)
-        self.direction = -1 * vec3(0, tsign, 0)
+        self.standby_position = vec3(0, 0, 300)
+        self.direction = vec3(0, 0, 1)
         self.state = self.KICKOFF
         self.shoot_time = 0
         self.last_pos = self.standby_position
@@ -34,6 +34,7 @@ class SniperBot(BaseAgent):
         self.next_is_super = False
         self.doing_super = False
         self.hit_pos = vec3(0, 0, 0)
+        self.standby_initiated = False
 
     def get_output(self, packet: GameTickPacket) -> SimpleControllerState:
         dt = packet.game_info.seconds_elapsed - self.last_elapsed_seconds
@@ -41,6 +42,9 @@ class SniperBot(BaseAgent):
         self.info.read_packet(packet)
 
         ball_pos = self.info.ball.pos
+
+        if not self.standby_initiated:
+            self.initiate_standby(packet)
 
         if ball_pos[0] != 0 or ball_pos[1] != 0:
             self.ball_moved = True
@@ -168,6 +172,36 @@ class SniperBot(BaseAgent):
             points.append(center + arm)
 
         self.renderer.draw_polyline_3d(points, self.renderer.team_color())
+
+    def initiate_standby(self, packet):
+        self.standby_initiated = True
+        snipers_on_team = 0
+        my_team_index = -1
+        for i in range(0, packet.num_cars):
+            car = packet.game_cars[i]
+            if car.team == self.team:
+                if car.name == self.name:
+                    my_team_index = snipers_on_team
+                if car.name[:6] == "Sniper":
+                    snipers_on_team += 1
+
+        tsign = -1 if self.team == 0 else 1
+
+        z = 300
+        y = 5030
+        spacing = 400
+
+        if snipers_on_team == 1:
+            self.standby_position = vec3(0, tsign * y, z)
+        elif snipers_on_team == 2:
+            self.standby_position = vec3(-400 + my_team_index * 800, tsign * y, z)
+        else:
+            # There are an even number of snipers on the team
+            is_top_row = (my_team_index < snipers_on_team / 2)
+            offset = spacing * (snipers_on_team - 2) / 4
+            row_index = my_team_index if is_top_row else my_team_index - snipers_on_team / 2
+            x = -offset + row_index * spacing
+            self.standby_position = vec3(x, tsign * y, z + 150 * is_top_row)
 
 
 
