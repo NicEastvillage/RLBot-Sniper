@@ -1,5 +1,4 @@
 import math
-import random
 
 from RLUtilities.GameInfo import GameInfo
 from rlbot.agents.base_agent import BaseAgent, SimpleControllerState
@@ -8,11 +7,11 @@ from rlbot.utils.structures.game_data_struct import GameTickPacket
 
 from RLUtilities.LinearAlgebra import *
 
-NORMAL_SPEED = 2300
-SUPER_SPEED = 3600
+NORMAL_SPEED = 2100
+SUPER_SPEED = 3500
 AIM_DURATION = 2.0
-AIM_DURATION_AFTER_KICKOFF = 0.2 + random.uniform(0, 1)
-GOAL_AIM_BIAS_AMOUNT = 50
+AIM_DURATION_AFTER_KICKOFF = 1.0
+GOAL_AIM_BIAS_AMOUNT = 60
 
 class SniperBot(BaseAgent):
     AIMING = 0
@@ -23,6 +22,7 @@ class SniperBot(BaseAgent):
         super().__init__(name, team, index)
         self.controls = SimpleControllerState()
         self.info = GameInfo(self.index, self.team)
+        self.t_index = 0
         self.standby_position = vec3(0, 0, 300)
         self.direction = vec3(0, 0, 1)
         self.state = self.KICKOFF
@@ -58,8 +58,9 @@ class SniperBot(BaseAgent):
             if packet.game_info.is_kickoff_pause:
                 self.kickoff_timer_edge = True
             if ball_pos[0] != 0 or ball_pos[1] != 0 or (self.kickoff_timer_edge and not packet.game_info.is_kickoff_pause):
-                self.shoot_time = self.info.time + AIM_DURATION_AFTER_KICKOFF
+                self.shoot_time = self.info.time + AIM_DURATION_AFTER_KICKOFF + self.t_index
                 self.controls.boost = False
+                self.controls.roll = 0
                 self.kickoff_timer_edge = False
                 self.state = self.AIMING
                 self.last_pos = self.standby_position
@@ -67,6 +68,7 @@ class SniperBot(BaseAgent):
         elif self.state == self.AIMING:
 
             self.controls.boost = False
+            self.controls.roll = 0
             self.hit_pos = self.predict_hit_pos()
             self.direction = d = normalize(self.hit_pos - self.standby_position)
 
@@ -100,13 +102,14 @@ class SniperBot(BaseAgent):
 
             self.last_pos = n_pos
             self.controls.boost = self.doing_super
+            self.controls.roll = self.doing_super
 
             if abs(n_pos[0]) > 4080 or abs(n_pos[1]) > 5080 or n_pos[2] < 0 or n_pos[2] > 2020:
                 # Crash
                 self.state = self.AIMING
                 self.shoot_time = self.info.time + AIM_DURATION
                 self.last_pos = self.standby_position
-                self.next_is_super = self.info.my_car.boost >= 100
+                self.next_is_super = self.info.my_car.boost >= 99
 
         self.render_aiming(self.hit_pos)
 
@@ -176,12 +179,11 @@ class SniperBot(BaseAgent):
     def initiate_standby(self, packet):
         self.standby_initiated = True
         snipers_on_team = 0
-        my_team_index = -1
         for i in range(0, packet.num_cars):
             car = packet.game_cars[i]
             if car.team == self.team:
                 if car.name == self.name:
-                    my_team_index = snipers_on_team
+                    self.t_index = snipers_on_team
                 if car.name[:6] == "Sniper":
                     snipers_on_team += 1
 
@@ -194,12 +196,12 @@ class SniperBot(BaseAgent):
         if snipers_on_team == 1:
             self.standby_position = vec3(0, tsign * y, z)
         elif snipers_on_team == 2:
-            self.standby_position = vec3(-400 + my_team_index * 800, tsign * y, z)
+            self.standby_position = vec3(-400 + self.t_index * 800, tsign * y, z)
         else:
             # There are an even number of snipers on the team
-            is_top_row = (my_team_index < snipers_on_team / 2)
+            is_top_row = (self.t_index < snipers_on_team / 2)
             offset = spacing * (snipers_on_team - 2) / 4
-            row_index = my_team_index if is_top_row else my_team_index - snipers_on_team / 2
+            row_index = self.t_index if is_top_row else self.t_index - snipers_on_team / 2
             x = -offset + row_index * spacing
             self.standby_position = vec3(x, tsign * y, z + 150 * is_top_row)
 
