@@ -33,6 +33,7 @@ class SniperBot(BaseAgent):
         self.ball_moved = False
         self.next_is_super = False
         self.doing_super = False
+        self.hit_pos = vec3(0, 0, 0)
 
     def get_output(self, packet: GameTickPacket) -> SimpleControllerState:
         dt = packet.game_info.seconds_elapsed - self.last_elapsed_seconds
@@ -62,8 +63,8 @@ class SniperBot(BaseAgent):
         elif self.state == self.AIMING:
 
             self.controls.boost = False
-            ball_pos = self.predicted_ball_pos()
-            self.direction = d = normalize(ball_pos - self.standby_position)
+            self.hit_pos = self.predict_hit_pos()
+            self.direction = d = normalize(self.hit_pos - self.standby_position)
 
             rotation = Rotator(math.asin(d[2]), math.atan2(d[1], d[0]), 0)
             car_state = CarState(Physics(location=to_fb(self.standby_position),
@@ -73,9 +74,7 @@ class SniperBot(BaseAgent):
             game_state = GameState(cars={self.index: car_state})
             self.set_game_state(game_state)
 
-            self.renderer.begin_rendering()
-            self.renderer.draw_rect_3d(ball_pos, 10, 10, True, self.renderer.team_color(), True)
-            self.renderer.end_rendering()
+            self.render_aiming(self.hit_pos)
 
             if self.shoot_time < self.info.time:
                 self.state = self.FLYING
@@ -105,9 +104,11 @@ class SniperBot(BaseAgent):
                 self.last_pos = self.standby_position
                 self.next_is_super = self.info.my_car.boost >= 100
 
+        self.render_aiming(self.hit_pos)
+
         return self.controls
 
-    def predicted_ball_pos(self):
+    def predict_hit_pos(self):
         speed = SUPER_SPEED if self.next_is_super else NORMAL_SPEED
         ball_prediction = self.get_ball_prediction_struct()
 
@@ -135,6 +136,39 @@ class SniperBot(BaseAgent):
             return vec3(rlpos.x, rlpos.y, rlpos.z)
 
         return vec3(0, 0, 0)
+
+    def render_aiming(self, pos):
+        if self.state == self.AIMING or self.state == self.FLYING:
+            self.renderer.begin_rendering()
+            t = max(0, self.shoot_time - self.info.time)
+            r = 50 + 400 * t
+            self.draw_circle(pos, self.direction, r, 20 + int(r / (math.tau * 5)))
+            if self.state != self.FLYING:
+                l = self.direction * (70 + t * 100)
+                self.renderer.draw_line_3d(pos - l, pos + l, self.renderer.team_color())
+            else:
+                s = 70
+                x = vec3(s, 0, 0)
+                y = vec3(0, s, 0)
+                z = vec3(0, 0, s)
+                self.renderer.draw_line_3d(pos - x, pos + x, self.renderer.team_color())
+                self.renderer.draw_line_3d(pos - y, pos + y, self.renderer.team_color())
+                self.renderer.draw_line_3d(pos - z, pos + z, self.renderer.team_color())
+            self.renderer.end_rendering()
+
+    def draw_circle(self, center: vec3, normal: vec3, radius: float, pieces: int):
+        # Construct the arm that will be rotated
+        arm = normalize(cross(normal, center)) * radius
+        angle = 2 * math.pi / pieces
+        rotation_mat = axis_rotation(angle * normalize(normal))
+        points = [center + arm]
+
+        for i in range(pieces):
+            arm = dot(rotation_mat, arm)
+            points.append(center + arm)
+
+        self.renderer.draw_polyline_3d(points, self.renderer.team_color())
+
 
 
 def to_fb(vec: vec3):
