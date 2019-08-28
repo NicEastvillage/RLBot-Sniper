@@ -1,11 +1,8 @@
 import math
 
-from RLUtilities.GameInfo import GameInfo
 from rlbot.agents.base_agent import BaseAgent, SimpleControllerState
 from rlbot.utils.game_state_util import *
 from rlbot.utils.structures.game_data_struct import GameTickPacket
-
-from RLUtilities.LinearAlgebra import *
 
 NORMAL_SPEED = 2100
 SUPER_SPEED = 3500
@@ -21,7 +18,6 @@ class SniperBot(BaseAgent):
     def __init__(self, name, team, index):
         super().__init__(name, team, index)
         self.controls = SimpleControllerState()
-        self.info = GameInfo(self.index, self.team)
         self.t_index = 0
         self.standby_position = vec3(0, 0, 300)
         self.direction = vec3(0, 0, 1)
@@ -37,11 +33,13 @@ class SniperBot(BaseAgent):
         self.standby_initiated = False
 
     def get_output(self, packet: GameTickPacket) -> SimpleControllerState:
+        _ball_rlpos = packet.game_ball.physics.location
+        ball_pos = vec3(_ball_rlpos.x, _ball_rlpos.y, _ball_rlpos.z)
+        boost = packet.game_cars[self.index].boost
+        time = packet.game_info.seconds_elapsed
+
         dt = packet.game_info.seconds_elapsed - self.last_elapsed_seconds
         self.last_elapsed_seconds = packet.game_info.seconds_elapsed
-        self.info.read_packet(packet)
-
-        ball_pos = self.info.ball.pos
 
         if not self.standby_initiated:
             self.initiate_standby(packet)
@@ -49,7 +47,7 @@ class SniperBot(BaseAgent):
         if ball_pos[0] != 0 or ball_pos[1] != 0:
             self.ball_moved = True
 
-        if ball_pos[0] == 0 and ball_pos[1] == 0 and self.info.my_car.boost == 34 and not self.state == self.KICKOFF and self.ball_moved:
+        if ball_pos[0] == 0 and ball_pos[1] == 0 and boost == 34 and not self.state == self.KICKOFF and self.ball_moved:
             # Ball is placed at the center - assume kickoff
             self.state = self.KICKOFF
             self.ball_moved = False
@@ -58,7 +56,7 @@ class SniperBot(BaseAgent):
             if packet.game_info.is_kickoff_pause:
                 self.kickoff_timer_edge = True
             if ball_pos[0] != 0 or ball_pos[1] != 0 or (self.kickoff_timer_edge and not packet.game_info.is_kickoff_pause):
-                self.shoot_time = self.info.time + AIM_DURATION_AFTER_KICKOFF + self.t_index
+                self.shoot_time = time + AIM_DURATION_AFTER_KICKOFF + self.t_index
                 self.controls.boost = False
                 self.controls.roll = 0
                 self.kickoff_timer_edge = False
@@ -80,9 +78,7 @@ class SniperBot(BaseAgent):
             game_state = GameState(cars={self.index: car_state})
             self.set_game_state(game_state)
 
-            self.render_aiming(self.hit_pos)
-
-            if self.shoot_time < self.info.time:
+            if self.shoot_time < time:
                 self.state = self.FLYING
                 if self.next_is_super:
                     self.doing_super = True
@@ -107,11 +103,11 @@ class SniperBot(BaseAgent):
             if abs(n_pos[0]) > 4080 or abs(n_pos[1]) > 5080 or n_pos[2] < 0 or n_pos[2] > 2020:
                 # Crash
                 self.state = self.AIMING
-                self.shoot_time = self.info.time + AIM_DURATION
+                self.shoot_time = time + AIM_DURATION
                 self.last_pos = self.standby_position
-                self.next_is_super = self.info.my_car.boost >= 99
+                self.next_is_super = boost >= 99
 
-        self.render_aiming(self.hit_pos)
+        self.render_aiming(self.hit_pos, time)
 
         return self.controls
 
@@ -144,12 +140,12 @@ class SniperBot(BaseAgent):
 
         return vec3(0, 0, 0)
 
-    def render_aiming(self, pos):
+    def render_aiming(self, pos, time):
         if self.state == self.AIMING or self.state == self.FLYING:
             self.renderer.begin_rendering()
-            t = max(0, self.shoot_time - self.info.time)
-            r = 50 + 400 * t
-            self.draw_circle(pos, self.direction, r, 20 + int(r / (math.tau * 5)))
+            t = max(0, self.shoot_time - time)
+            r = vec3(0, 0, 70 + 200 * t)
+            self.renderer.draw_line_3d(pos - r, pos + r, self.renderer.team_color())
             if self.state != self.FLYING:
                 l = self.direction * (70 + t * 100)
                 self.renderer.draw_line_3d(pos - l, pos + l, self.renderer.team_color())
@@ -161,20 +157,8 @@ class SniperBot(BaseAgent):
                 self.renderer.draw_line_3d(pos - x, pos + x, self.renderer.team_color())
                 self.renderer.draw_line_3d(pos - y, pos + y, self.renderer.team_color())
                 self.renderer.draw_line_3d(pos - z, pos + z, self.renderer.team_color())
+                self.renderer.draw_rect_3d(pos, 4, 4, True, self.renderer.team_color(), True)
             self.renderer.end_rendering()
-
-    def draw_circle(self, center: vec3, normal: vec3, radius: float, pieces: int):
-        # Construct the arm that will be rotated
-        arm = normalize(cross(normal, center)) * radius
-        angle = 2 * math.pi / pieces
-        rotation_mat = axis_rotation(angle * normalize(normal))
-        points = [center + arm]
-
-        for i in range(pieces):
-            arm = dot(rotation_mat, arm)
-            points.append(center + arm)
-
-        self.renderer.draw_polyline_3d(points, self.renderer.team_color())
 
     def initiate_standby(self, packet):
         self.standby_initiated = True
@@ -207,5 +191,44 @@ class SniperBot(BaseAgent):
 
 
 
-def to_fb(vec: vec3):
+def to_fb(vec):
     return Vector3(vec[0], vec[1], vec[2])
+
+
+class vec3:
+    def __init__(self, x, y, z):
+        self.data = [x, y, z]
+
+    def __getitem__(self, key):
+        return self.data[key]
+
+    def __setitem__(self, key, value):
+        self.data[key] = value
+
+    def __add__(self, other):
+        return vec3(self[0] + other[0], self[1] + other[1], self[2] + other[2])
+
+    def __sub__(self, other):
+        return vec3(self[0] - other[0], self[1] - other[1], self[2] - other[2])
+
+    def __neg__(self):
+        return vec3(-self[0], -self[1], -self[2])
+
+    def __mul__(self, scale):
+        return vec3(self[0] * scale, self[1] * scale, self[2] * scale)
+
+    def __rmul__(self, scale):
+        return self * scale
+
+    def __truediv__(self, scale):
+        scale = 1 / float(scale)
+        return self * scale
+
+
+def norm(vec):
+    """Returns the magnitude of the vector."""
+    return math.sqrt(vec[0] ** 2 + vec[1] ** 2 + vec[2] ** 2)
+
+def normalize(vec):
+    """Returns a vector with the same direction but a magnitude/length of one."""
+    return vec / norm(vec)
