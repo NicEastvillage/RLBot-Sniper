@@ -6,7 +6,7 @@ from rlbot.utils.structures.game_data_struct import GameTickPacket
 
 import rendering
 from rldata import GameInfo
-from vec import Vec3, norm, normalize, cross
+from vec import Vec3, norm, normalize
 
 NORMAL_SPEED = 2100
 SUPER_SPEED = 3500
@@ -78,7 +78,7 @@ class SniperBot(BaseAgent):
 
         return self.controls
 
-    def predict_hit_pos(self):
+    def predict_hit_pos(self, from_pos):
         speed = SUPER_SPEED if self.next_is_super else NORMAL_SPEED
         ball_prediction = self.get_ball_prediction_struct()
 
@@ -91,7 +91,7 @@ class SniperBot(BaseAgent):
                 time = i * TIME_PER_SLICES
                 rlpos = ball_prediction.slices[i].physics.location
                 pos = Vec3(rlpos.x, rlpos.y, rlpos.z)
-                dist = norm(self.info.my_car.aim_pos - pos)
+                dist = norm(from_pos - pos)
                 travel_time = dist / speed
                 if time >= travel_time:
                     # Add small bias for aiming
@@ -141,7 +141,7 @@ class SniperBot(BaseAgent):
             self.last_pos = self.info.my_car.aim_pos
 
     def do_aiming_state(self):
-        self.expected_hit_pos, travel_time = self.predict_hit_pos()
+        self.expected_hit_pos, travel_time = self.predict_hit_pos(self.info.my_car.aim_pos)
         self.expected_hit_time = self.info.time + travel_time
         self.direction = d = normalize(self.expected_hit_pos - self.info.my_car.aim_pos)
 
@@ -174,8 +174,8 @@ class SniperBot(BaseAgent):
         self.controls.boost = self.doing_super
         self.controls.roll = self.doing_super
 
+        # Crash?
         if abs(new_pos.x) > 4080 or abs(new_pos.y) > 5080 or new_pos.z < 0 or new_pos.z > 2020:
-            # Crash
             self.state = self.AIMING
             self.next_flight_start_time = self.info.time + AIM_DURATION
             self.last_pos = self.info.my_car.aim_pos
